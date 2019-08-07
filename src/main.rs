@@ -5,7 +5,9 @@ use std::{env, error::Error, process, thread};
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use dirs;
-use lettre::{sendmail::SendmailTransport, Envelope, SendableEmail, Transport};
+use lettre::smtp::authentication::{Credentials, Mechanism};
+use lettre::smtp::ConnectionReuseParameters;
+use lettre::{Envelope, SendableEmail, SmtpClient, SmtpTransport, Transport};
 use log::{debug, error, info, LevelFilter};
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -20,6 +22,7 @@ const DAY: i64 = 24 * 60; // In Minutes.
 const ORDER: Ordering = Ordering::SeqCst;
 const LOG_FILE: &str = ".alarm_integral.log";
 const STATE_FILE: &str = ".alarm_integral.state";
+const GMAIL: &str = "smtp.gmail.com";
 
 static mut COUNTER: AtomicI64 = AtomicI64::new(0);
 static mut LAST_ALARM: SystemTime = UNIX_EPOCH;
@@ -34,12 +37,23 @@ fn main() {
         }
     }
 
-
-    let start_message = unsafe {format!("Starting, last time setted is: {}, with counter: {}", DateTime::<Utc>::from(LAST_ALARM), COUNTER.load(ORDER))};
+    let start_message = unsafe {
+        format!("Starting, last time setted is: {}, with counter: {}", DateTime::<Utc>::from(LAST_ALARM), COUNTER.load(ORDER))
+    };
 
     debug!("{}", start_message);
     let envelop = Envelope::new(None, vec!["elichai.turkel@gmail.com".parse().unwrap()]).unwrap();
-    let mut transport = SendmailTransport::new();
+
+    let username = env::var("USERNAME").expect("Please Provide env var, USERNAME");
+    let pass = env::var("PASS").expect("Please Provide env var, USERNAME");
+
+    let mut transport = SmtpClient::new_simple(GMAIL)
+        .unwrap()
+        .credentials(Credentials::new(username, pass))
+        .smtp_utf8(true)
+        .authentication_mechanism(Mechanism::Plain)
+        .connection_reuse(ConnectionReuseParameters::ReuseUnlimited)
+        .transport();
     send_email(&envelop, "start id", start_message, &mut transport);
 
     let mut next = next_duration();
@@ -67,7 +81,7 @@ fn main() {
     }
 }
 
-fn send_email(envelop: &Envelope, id: &str, message: String, sender: &mut SendmailTransport) {
+fn send_email(envelop: &Envelope, id: &str, message: String, sender: &mut SmtpTransport) {
     let email = SendableEmail::new(envelop.clone(), id.to_string(), message.clone().into_bytes());
     if let Err(e) = sender.send(email) {
         error!("failed to send email, error: {:?}. content: {}", e, message);
