@@ -1,29 +1,46 @@
+use std::fs::{File, OpenOptions};
+use std::sync::atomic::{self, AtomicI64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{env, error::Error, process, thread};
+
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use dirs;
 use lettre::{sendmail::SendmailTransport, Envelope, SendableEmail, Transport};
 use log::{debug, error, info, LevelFilter};
+use serde::{Deserialize, Serialize};
+use serde_json;
+use signal_hook;
 use simplelog::WriteLogger;
-use std::env;
-use std::fs::File;
-use std::process;
-use std::thread;
-use std::time::{Duration, UNIX_EPOCH};
 
-const BASE_LINE: Duration = Duration::from_secs(1_565_197_800); // 07-08-2019-13:10 NY time. (17:10 UTC).
+const BASE_LINE: Duration = Duration::from_secs(1_565_197_800);
+// 07-08-2019-13:10 NY time. (17:10 UTC).
 const FIVE_MINUTES: i64 = 5;
 const DAY: i64 = 24 * 60; // In Minutes.
+
+static mut COUNTER: AtomicI64 = AtomicI64::new(0);
+static mut LAST_ALARM: SystemTime = UNIX_EPOCH;
+
+const ORDER: Ordering = Ordering::SeqCst;
+const LOG_FILE: &str = ".alarm_integral.log";
+const STATE_FILE: &str = ".alarm_integral.state";
 
 fn main() {
     demonize();
     init_logger();
+    register_signal();
+    if try_to_restore_state().is_err() {
+        unsafe {
+            LAST_ALARM += BASE_LINE;
+        }
+    }
 
-    let mut last_alarm = DateTime::from(UNIX_EPOCH + BASE_LINE);
+    unsafe { debug!("Starting, last time setted is: {}, with counter: {}", DateTime::<Utc>::from(LAST_ALARM), COUNTER.load(ORDER)) };
+
     let envelop = Envelope::new(None, vec!["elichai.turkel@gmail.com".parse().unwrap()]).unwrap();
     let mut transport = SendmailTransport::new();
 
-    let mut counter = 0;
     loop {
-        let next = next_duration(&mut counter);
+        let next = next_duration();
         {
             let hours = next.num_hours();
             let mins = next.num_minutes() - (hours * 60);
@@ -32,8 +49,10 @@ fn main() {
 
         thread::sleep(next.to_std().unwrap());
 
-        last_alarm = Utc::now();
-        let msg = format!("Reminder for the {} time, sent time: {}", counter, last_alarm);
+        unsafe { LAST_ALARM = SystemTime::now() };
+
+        let msg =
+            unsafe { format!("Reminder for the {} time, sent time: {}", COUNTER.load(ORDER), DateTime::<Utc>::from(LAST_ALARM)) };
         send_email(&envelop, "id", msg, &mut transport);
     }
 }
@@ -47,15 +66,15 @@ fn send_email(envelop: &Envelope, id: &str, message: String, sender: &mut Sendma
     }
 }
 
-fn next_duration(x: &mut i64) -> ChronoDuration {
-    *x += 1;
+fn next_duration() -> ChronoDuration {
+    let x = unsafe { COUNTER.fetch_add(1, ORDER) } + 1;
     let next = FIVE_MINUTES * (x.pow(2)) + DAY; // f(x) = 5x^2 + c; (c=start_time, and need to add 24 hours.)
     ChronoDuration::minutes(next)
 }
 
 fn init_logger() {
     let mut log_location = dirs::home_dir().unwrap();
-    log_location.push(".alarm_integral.log");
+    log_location.push(LOG_FILE);
     WriteLogger::init(LevelFilter::Info, Default::default(), File::create(log_location).unwrap()).unwrap()
 }
 
@@ -68,4 +87,41 @@ fn demonize() {
     } else {
         println!("Daemonized!, id: {}", process::id());
     }
+}
+
+fn register_signal() {
+    unsafe {
+        signal_hook::register(signal_hook::SIGTERM, save_status_to_file_and_exit).expect("Failed to set signal");
+        signal_hook::register(signal_hook::SIGHUP, save_status_to_file_and_exit).expect("Failed to set signal");
+        signal_hook::register(signal_hook::SIGQUIT, save_status_to_file_and_exit).expect("Failed to set signal");
+        signal_hook::register(signal_hook::SIGINT, save_status_to_file_and_exit).expect("Failed to set signal");
+        signal_hook::register(signal_hook::SIGABRT, save_status_to_file_and_exit).expect("Failed to set signal");
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct State {
+    pub counter: i64,
+    pub time: SystemTime,
+}
+
+fn save_status_to_file_and_exit() {
+    let mut save_location = dirs::home_dir().expect("Failed to save state");
+    save_location.push(STATE_FILE);
+    let file = OpenOptions::new().write(true).create(true).open(save_location).expect("Failed to save state");
+    atomic::compiler_fence(ORDER);
+    let state = unsafe { State { counter: COUNTER.load(ORDER), time: LAST_ALARM } };
+    serde_json::to_writer(file, &state).expect("Failed to save state");
+    process::exit(1);
+}
+
+fn try_to_restore_state() -> Result<(), Box<dyn Error>> {
+    let mut save_location = dirs::home_dir().unwrap();
+    save_location.push(STATE_FILE);
+    let f = File::open(save_location)?;
+    let state: State = serde_json::from_reader(f)?;
+    unsafe { COUNTER.swap(state.counter, ORDER) };
+    unsafe { LAST_ALARM = state.time };
+    // TODO: Fast forward the calculation.
+    Ok(())
 }

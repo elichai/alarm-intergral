@@ -10,5 +10,8 @@ edition = "2018"
 lettre = { version = "0.9", default-features = false, features = ["sendmail-transport" ] }
 log = "0.4"
 simplelog = { version = "0.6", default-features = false }
-chrono = "0.4"
+chrono = { version = "0.4", default-features = false }
 dirs = "2.0"
+signal-hook = "0.1.10"
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+serde_json = "1.0"
