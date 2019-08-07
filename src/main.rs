@@ -42,7 +42,8 @@ fn main() {
     };
 
     debug!("{}", start_message);
-    let envelop = Envelope::new(None, vec!["elichai.turkel@gmail.com".parse().unwrap()]).unwrap();
+    let envelop =
+        Envelope::new(Some("elichai2.turkel@gmail.com".parse().unwrap()), vec!["elichai.turkel@gmail.com".parse().unwrap()]).unwrap();
 
     let username = env::var("USERNAME").expect("Please Provide env var, USERNAME");
     let pass = env::var("PASS").expect("Please Provide env var, USERNAME");
