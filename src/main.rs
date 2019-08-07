@@ -34,10 +34,13 @@ fn main() {
         }
     }
 
-    unsafe { debug!("Starting, last time setted is: {}, with counter: {}", DateTime::<Utc>::from(LAST_ALARM), COUNTER.load(ORDER)) };
 
+    let start_message = unsafe {format!("Starting, last time setted is: {}, with counter: {}", DateTime::<Utc>::from(LAST_ALARM), COUNTER.load(ORDER))};
+
+    debug!(start_message);
     let envelop = Envelope::new(None, vec!["elichai.turkel@gmail.com".parse().unwrap()]).unwrap();
     let mut transport = SendmailTransport::new();
+    send_email(&envelop, "start id", start_message, &mut transport);
 
     let mut next = next_duration();
     let sys_next = unsafe { LAST_ALARM + next.to_std().unwrap() };
