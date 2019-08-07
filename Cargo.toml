@@ -1,0 +1,14 @@
+[package]
+name = "alarm-integral"
+version = "0.1.0"
+authors = ["Elichai Turkel <elichai.turkel@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+lettre = { version = "0.9", default-features = false, features = ["sendmail-transport" ] }
+log = "0.4"
+simplelog = { version = "0.6", default-features = false }
+chrono = "0.4"
+dirs = "2.0"
