@@ -17,12 +17,12 @@ const BASE_LINE: Duration = Duration::from_secs(1_565_197_800);
 const FIVE_MINUTES: i64 = 5;
 const DAY: i64 = 24 * 60; // In Minutes.
 
-static mut COUNTER: AtomicI64 = AtomicI64::new(0);
-static mut LAST_ALARM: SystemTime = UNIX_EPOCH;
-
 const ORDER: Ordering = Ordering::SeqCst;
 const LOG_FILE: &str = ".alarm_integral.log";
 const STATE_FILE: &str = ".alarm_integral.state";
+
+static mut COUNTER: AtomicI64 = AtomicI64::new(0);
+static mut LAST_ALARM: SystemTime = UNIX_EPOCH;
 
 fn main() {
     demonize();
@@ -39,8 +39,14 @@ fn main() {
     let envelop = Envelope::new(None, vec!["elichai.turkel@gmail.com".parse().unwrap()]).unwrap();
     let mut transport = SendmailTransport::new();
 
+    let mut next = next_duration();
+    let sys_next = unsafe { LAST_ALARM + next.to_std().unwrap() };
+    if sys_next > SystemTime::now() {
+        let sys_dur = sys_next.duration_since(SystemTime::now()).unwrap();
+
+        next = ChronoDuration::seconds(sys_dur.as_secs() as i64);
+    }
     loop {
-        let next = next_duration();
         {
             let hours = next.num_hours();
             let mins = next.num_minutes() - (hours * 60);
@@ -54,6 +60,7 @@ fn main() {
         let msg =
             unsafe { format!("Reminder for the {} time, sent time: {}", COUNTER.load(ORDER), DateTime::<Utc>::from(LAST_ALARM)) };
         send_email(&envelop, "id", msg, &mut transport);
+        next = next_duration();
     }
 }
 
